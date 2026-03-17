@@ -10,6 +10,8 @@ module.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletP
     var BRANCH = 10;
     var SEG_LEN = 4;
     var SAMPLE_ANGLES = 72;
+    var MAX_THREAT_DIST_SQ = 260 * 260;
+    var MAX_LINE_PENALTY_DIST_SQ = 280 * 280;
 
     function normAngle(a) {
         while (a <= -Math.PI) a += 2 * Math.PI;
@@ -85,7 +87,8 @@ module.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletP
 
     function isHitAt(tx, ty, step, entries) {
         var list = entries || cachedBulletPaths;
-        for (var i = 0; i < list.length; i++) {
+        var len = list.length;
+        for (var i = 0; i < len; i++) {
             if (list[i].ignoreForDodge) continue;
             var bp = bulletAtStep(list[i], step);
             if (!bp) continue;
@@ -132,14 +135,16 @@ module.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletP
         var entry = cachedBulletPaths[bi];
         if (entry.ignoreForDodge) continue;
         var path = entry.path;
-        for (var s = 0; s < HORIZON && s < path.length; s += 2) {
+        var pathLen = path.length;
+        var maxS = HORIZON < pathLen ? HORIZON : pathLen;
+        for (var s = 0; s < maxS; s += 2) {
             var bp = path[s];
             if (!isBulletClosing(entry, s, tankX, tankY)) continue;
             var dx = bp.x - tankX;
             var dy = bp.y - tankY;
             var d2 = dx * dx + dy * dy;
             var d = Math.sqrt(d2);
-            if (d > 260) continue;
+            if (d2 > MAX_THREAT_DIST_SQ) continue;
             hasThreat = true;
             if (!activeFlags[bi]) {
                 activeFlags[bi] = true;
@@ -253,7 +258,8 @@ module.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletP
 
     function minBulletDistSq(px, py, step) {
         var best = Infinity;
-        for (var i = 0; i < simEntries.length; i++) {
+        var len = simEntries.length;
+        for (var i = 0; i < len; i++) {
             if (simEntries[i].ignoreForDodge) continue;
             var bp = bulletAtStep(simEntries[i], step);
             if (!bp) continue;
@@ -314,7 +320,8 @@ module.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletP
         if (angle === null) return 0;
         var mvx = Math.cos(angle), mvy = Math.sin(angle);
         var penalty = 0;
-        for (var i = 0; i < simEntries.length; i++) {
+        var len = simEntries.length;
+        for (var i = 0; i < len; i++) {
             var entry = simEntries[i];
             if (entry.ignoreForDodge) continue;
             var bp = bulletAtStep(entry, step);
@@ -323,7 +330,7 @@ module.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletP
 
             var dx = bp.x - px, dy = bp.y - py;
             var d2 = dx * dx + dy * dy;
-            if (d2 > 280 * 280) continue;
+            if (d2 > MAX_LINE_PENALTY_DIST_SQ) continue;
 
             var v = bulletVelAtStep(entry, step);
             var vm = Math.sqrt(v.vx * v.vx + v.vy * v.vy);
@@ -557,22 +564,25 @@ module.exports.drawDodgePath = function (ctx, cam, tankX, tankY, dodgePath) {
     }
 
     ctx.save();
+    var camLeft = cam.camLeft;
+    var camTop = cam.camTop;
     for (var p = 0; p < drawList.length; p++) {
         var path = drawList[p];
-        var prevX = tankX - cam.camLeft;
-        var prevY = tankY - cam.camTop;
+        var prevX = tankX - camLeft;
+        var prevY = tankY - camTop;
+        var pathLen = path.length;
 
         var rankT = p / Math.max(1, drawList.length - 1);
         var baseAlpha = p === 0 ? 1 : (0.58 * Math.pow(1 - rankT, 1.25) + 0.12);
         var baseWidth = p === 0 ? 6.5 : (4.8 - 2.1 * rankT);
 
-        for (var i = 0; i < path.length; i++) {
-            var t = i / path.length;
+        for (var i = 0; i < pathLen; i++) {
+            var t = i / pathLen;
             var segAlpha = Math.max(0.08, baseAlpha * (1 - 0.45 * Math.pow(t, 1.1)));
             ctx.beginPath();
             ctx.moveTo(prevX, prevY);
-            prevX = path[i].x - cam.camLeft;
-            prevY = path[i].y - cam.camTop;
+            prevX = path[i].x - camLeft;
+            prevY = path[i].y - camTop;
             ctx.lineTo(prevX, prevY);
             ctx.lineWidth = Math.max(1.1, baseWidth * (0.95 - 0.35 * t));
             ctx.strokeStyle = "rgba(50, 255, 50, " + segAlpha + ")";

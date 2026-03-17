@@ -23,6 +23,17 @@ function readJson(filePath) {
     return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
 
+function getConfigDefaults(schema) {
+    const out = Object.create(null);
+    if (!schema) return out;
+    for (const key in schema) {
+        if (!Object.prototype.hasOwnProperty.call(schema, key)) continue;
+        const spec = schema[key] || {};
+        if (spec.default !== undefined) out[key] = spec.default;
+    }
+    return out;
+}
+
 function listModuleNames(dirPath) {
     if (!fs.existsSync(dirPath)) return [];
     return fs.readdirSync(dirPath)
@@ -238,7 +249,7 @@ function makeBootstrap(entryId) {
 })([`;
 }
 
-function buildBundle(sourceDir, fallbackDir, outPath) {
+function buildBundle(sourceDir, fallbackDir, outPath, configDefaults) {
     ensureDir(path.dirname(outPath));
 
     const graph = discoverBundleModules(sourceDir, fallbackDir, ENTRY_MODULE_NAME);
@@ -251,7 +262,18 @@ function buildBundle(sourceDir, fallbackDir, outPath) {
         modules.push(transformModule(name, source, graph.moduleMap));
     }
 
-    const bundle = BABEL_HELPERS + makeBootstrap(graph.entryId) + '\n' + modules.join(',\n') + '\n]);';
+    let bundle = BABEL_HELPERS + makeBootstrap(graph.entryId) + '\n' + modules.join(',\n') + '\n]);';
+
+    // Embed manifest config defaults into the bundle so the running mod
+    // can read `globalThis.mod_config` immediately.
+    try {
+        const defaults = configDefaults || {};
+        const snippet = '(function(){try{if(!globalThis.mod_config)globalThis.mod_config={};Object.assign(globalThis.mod_config,' + JSON.stringify(defaults) + ');}catch(e){console.warn("Failed to set globalThis.mod_config",e);}})();\n';
+        bundle = snippet + bundle;
+    } catch (e) {
+        console.warn('Failed to embed config defaults for', outPath, e);
+    }
+
     fs.writeFileSync(outPath, bundle, 'utf8');
     console.log('\nBundle written to: ' + outPath);
     console.log('Size: ' + (Buffer.byteLength(bundle) / 1024).toFixed(1) + ' KB\n');
@@ -318,7 +340,8 @@ function build() {
         const mod = mods[i];
         console.log('=== Building mod:', mod.id, '===');
         const outPath = path.join(OUT_MODS_DIR, mod.id, 'supertanks.js');
-        buildBundle(mod.dir, vanilla.dir, outPath);
+        const defaults = getConfigDefaults(mod.manifest && mod.manifest.config ? mod.manifest.config : {});
+        buildBundle(mod.dir, vanilla.dir, outPath, defaults);
         writeModMetadata(mod);
     }
 

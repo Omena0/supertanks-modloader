@@ -1,3 +1,4 @@
+(function(){try{if(!globalThis.mod_config)globalThis.mod_config={};Object.assign(globalThis.mod_config,{});}catch(e){console.warn("Failed to set globalThis.mod_config",e);}})();
 function _classCallCheck(instance, Constructor) {
     if (!(instance instanceof Constructor)) throw new TypeError("Cannot call a class as a function");
 }
@@ -1858,16 +1859,20 @@ t.exports.drawBulletPredictions = function (ctx, cam, mazeData, cachedBulletPath
     if (!mazeData.cellsAcross) return;
     ctx.save();
     var DANGER_DIST = 25;
+    var DANGER_DIST_SQ = DANGER_DIST * DANGER_DIST;
+    var camLeft = cam.camLeft;
+    var camTop = cam.camTop;
     for (var i = 0; i < cachedBulletPaths.length; i++) {
         var entry = cachedBulletPaths[i];
         var b = entry.bullet;
         var path = entry.path;
+        var pathLen = path.length;
 
         var willHitPlayer = false;
-        for (var c = 0; c < path.length; c++) {
+        for (var c = 0; c < pathLen; c++) {
             var hdx = path[c].x - playerX;
             var hdy = path[c].y - playerY;
-            if (Math.sqrt(hdx * hdx + hdy * hdy) < DANGER_DIST) {
+            if (hdx * hdx + hdy * hdy < DANGER_DIST_SQ) {
                 willHitPlayer = true;
                 break;
             }
@@ -1875,20 +1880,20 @@ t.exports.drawBulletPredictions = function (ctx, cam, mazeData, cachedBulletPath
 
         if (willHitPlayer) {
             ctx.beginPath();
-            ctx.arc(b.x - cam.camLeft, b.y - cam.camTop, 12, 0, 2 * Math.PI);
+            ctx.arc(b.x - camLeft, b.y - camTop, 12, 0, 2 * Math.PI);
             ctx.lineWidth = 2.5;
             ctx.strokeStyle = "rgba(255, 0, 0, 0.8)";
             ctx.stroke();
         }
 
-        var prevX = b.x - cam.camLeft, prevY = b.y - cam.camTop;
-        for (var s = 0; s < path.length; s++) {
-            var t = s / path.length;
+        var prevX = b.x - camLeft, prevY = b.y - camTop;
+        for (var s = 0; s < pathLen; s++) {
+            var t = s / pathLen;
             var lw = 4 * (1 - t) + 0.5;
             ctx.beginPath();
             ctx.moveTo(prevX, prevY);
-            prevX = path[s].x - cam.camLeft;
-            prevY = path[s].y - cam.camTop;
+            prevX = path[s].x - camLeft;
+            prevY = path[s].y - camTop;
             ctx.lineTo(prevX, prevY);
             ctx.lineWidth = lw;
             ctx.strokeStyle = "rgba(255, 50, 50, " + (0.35 * (1 - t) + 0.05) + ")";
@@ -1912,6 +1917,8 @@ t.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletPaths,
     var BRANCH = 10;
     var SEG_LEN = 4;
     var SAMPLE_ANGLES = 72;
+    var MAX_THREAT_DIST_SQ = 260 * 260;
+    var MAX_LINE_PENALTY_DIST_SQ = 280 * 280;
 
     function normAngle(a) {
         while (a <= -Math.PI) a += 2 * Math.PI;
@@ -1987,7 +1994,8 @@ t.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletPaths,
 
     function isHitAt(tx, ty, step, entries) {
         var list = entries || cachedBulletPaths;
-        for (var i = 0; i < list.length; i++) {
+        var len = list.length;
+        for (var i = 0; i < len; i++) {
             if (list[i].ignoreForDodge) continue;
             var bp = bulletAtStep(list[i], step);
             if (!bp) continue;
@@ -2034,14 +2042,16 @@ t.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletPaths,
         var entry = cachedBulletPaths[bi];
         if (entry.ignoreForDodge) continue;
         var path = entry.path;
-        for (var s = 0; s < HORIZON && s < path.length; s += 2) {
+        var pathLen = path.length;
+        var maxS = HORIZON < pathLen ? HORIZON : pathLen;
+        for (var s = 0; s < maxS; s += 2) {
             var bp = path[s];
             if (!isBulletClosing(entry, s, tankX, tankY)) continue;
             var dx = bp.x - tankX;
             var dy = bp.y - tankY;
             var d2 = dx * dx + dy * dy;
             var d = Math.sqrt(d2);
-            if (d > 260) continue;
+            if (d2 > MAX_THREAT_DIST_SQ) continue;
             hasThreat = true;
             if (!activeFlags[bi]) {
                 activeFlags[bi] = true;
@@ -2155,7 +2165,8 @@ t.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletPaths,
 
     function minBulletDistSq(px, py, step) {
         var best = Infinity;
-        for (var i = 0; i < simEntries.length; i++) {
+        var len = simEntries.length;
+        for (var i = 0; i < len; i++) {
             if (simEntries[i].ignoreForDodge) continue;
             var bp = bulletAtStep(simEntries[i], step);
             if (!bp) continue;
@@ -2216,7 +2227,8 @@ t.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletPaths,
         if (angle === null) return 0;
         var mvx = Math.cos(angle), mvy = Math.sin(angle);
         var penalty = 0;
-        for (var i = 0; i < simEntries.length; i++) {
+        var len = simEntries.length;
+        for (var i = 0; i < len; i++) {
             var entry = simEntries[i];
             if (entry.ignoreForDodge) continue;
             var bp = bulletAtStep(entry, step);
@@ -2225,7 +2237,7 @@ t.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletPaths,
 
             var dx = bp.x - px, dy = bp.y - py;
             var d2 = dx * dx + dy * dy;
-            if (d2 > 280 * 280) continue;
+            if (d2 > MAX_LINE_PENALTY_DIST_SQ) continue;
 
             var v = bulletVelAtStep(entry, step);
             var vm = Math.sqrt(v.vx * v.vx + v.vy * v.vy);
@@ -2459,22 +2471,25 @@ t.exports.drawDodgePath = function (ctx, cam, tankX, tankY, dodgePath) {
     }
 
     ctx.save();
+    var camLeft = cam.camLeft;
+    var camTop = cam.camTop;
     for (var p = 0; p < drawList.length; p++) {
         var path = drawList[p];
-        var prevX = tankX - cam.camLeft;
-        var prevY = tankY - cam.camTop;
+        var prevX = tankX - camLeft;
+        var prevY = tankY - camTop;
+        var pathLen = path.length;
 
         var rankT = p / Math.max(1, drawList.length - 1);
         var baseAlpha = p === 0 ? 1 : (0.58 * Math.pow(1 - rankT, 1.25) + 0.12);
         var baseWidth = p === 0 ? 6.5 : (4.8 - 2.1 * rankT);
 
-        for (var i = 0; i < path.length; i++) {
-            var t = i / path.length;
+        for (var i = 0; i < pathLen; i++) {
+            var t = i / pathLen;
             var segAlpha = Math.max(0.08, baseAlpha * (1 - 0.45 * Math.pow(t, 1.1)));
             ctx.beginPath();
             ctx.moveTo(prevX, prevY);
-            prevX = path[i].x - cam.camLeft;
-            prevY = path[i].y - cam.camTop;
+            prevX = path[i].x - camLeft;
+            prevY = path[i].y - camTop;
             ctx.lineTo(prevX, prevY);
             ctx.lineWidth = Math.max(1.1, baseWidth * (0.95 - 0.35 * t));
             ctx.strokeStyle = "rgba(50, 255, 50, " + segAlpha + ")";
@@ -2533,6 +2548,16 @@ t.exports.findAutoKillShot = function (args) {
     var dt = constants.PHYSICS_INTERVAL;
     var ttlSteps = Math.ceil(9000 / dt);
     var quant = (2 * Math.PI) / 720;
+    var DIR8 = [
+        { c: 1, s: 0 },
+        { c: 0.7071067811865476, s: 0.7071067811865476 },
+        { c: 0, s: 1 },
+        { c: -0.7071067811865476, s: 0.7071067811865476 },
+        { c: -1, s: 0 },
+        { c: -0.7071067811865476, s: -0.7071067811865476 },
+        { c: 0, s: -1 },
+        { c: 0.7071067811865476, s: -0.7071067811865476 },
+    ];
 
     function normAngle(a) {
         while (a <= -Math.PI) a += 2 * Math.PI;
@@ -2579,16 +2604,17 @@ t.exports.findAutoKillShot = function (args) {
     }
 
     function localOpenAreaScore(px, py) {
-        var dirs = 8;
         var maxProbe = 260;
         var step = 26;
         var sum = 0;
+        var dirs = DIR8.length;
         for (var i = 0; i < dirs; i++) {
-            var a = (i / dirs) * 2 * Math.PI - Math.PI;
+            var dc = DIR8[i].c;
+            var ds = DIR8[i].s;
             var reached = 0;
             for (var d = step; d <= maxProbe; d += step) {
-                var qx = px + Math.cos(a) * d;
-                var qy = py + Math.sin(a) * d;
+                var qx = px + dc * d;
+                var qy = py + ds * d;
                 if (pointBlocked(qx, qy, 22)) break;
                 reached = d;
             }
@@ -2609,12 +2635,11 @@ t.exports.findAutoKillShot = function (args) {
     }
 
     function corridorNetworkDepth(px, py) {
-        var dirs = 8;
+        var dirs = DIR8.length;
         var freeDirs = 0;
         for (var i = 0; i < dirs; i++) {
-            var a = (i / dirs) * 2 * Math.PI - Math.PI;
-            var qx = px + Math.cos(a) * 90;
-            var qy = py + Math.sin(a) * 90;
+            var qx = px + DIR8[i].c * 90;
+            var qy = py + DIR8[i].s * 90;
             if (!pointBlocked(qx, qy, 20)) freeDirs++;
         }
         return freeDirs / dirs;
@@ -2689,7 +2714,8 @@ t.exports.findAutoKillShot = function (args) {
 
     function estimateBounceCount(path) {
         var bounces = 0;
-        for (var i = 1; i < path.length; i++) {
+        var len = path.length;
+        for (var i = 1; i < len; i++) {
             var pv = path[i - 1];
             var cv = path[i];
             if ((pv.vx > 0 && cv.vx < 0) || (pv.vx < 0 && cv.vx > 0)) bounces++;
@@ -2701,7 +2727,8 @@ t.exports.findAutoKillShot = function (args) {
     function pathCoverage(path) {
         var seenCells = {};
         var count = 0;
-        for (var i = 0; i < path.length; i += 6) {
+        var len = path.length;
+        for (var i = 0; i < len; i += 6) {
             var cx = Math.floor(path[i].x / 100);
             var cy = Math.floor(path[i].y / 100);
             var key = cx + ":" + cy;
@@ -2731,7 +2758,8 @@ t.exports.findAutoKillShot = function (args) {
     function similarActiveStats(path) {
         var best = 0;
         var count = 0;
-        for (var i = 0; i < activeBulletPaths.length; i++) {
+        var len = activeBulletPaths.length;
+        for (var i = 0; i < len; i++) {
             var other = activeBulletPaths[i] && activeBulletPaths[i].path;
             if (!other || other.length < 5) continue;
             var sim = pathSimilarity(path, other);
@@ -2751,7 +2779,8 @@ t.exports.findAutoKillShot = function (args) {
         var arr = _laneShotMemory[key];
         if (!arr || arr.length === 0) return 0;
         var kept = [];
-        for (var i = 0; i < arr.length; i++) {
+        var len = arr.length;
+        for (var i = 0; i < len; i++) {
             if (nowTick - arr[i] <= windowTicks) kept.push(arr[i]);
         }
         _laneShotMemory[key] = kept;
@@ -2780,38 +2809,53 @@ t.exports.findAutoKillShot = function (args) {
         return false;
     }
 
-    function predictedTargetPosAtStep(target, step) {
+    function getTargetPredictor(target) {
         var dx = localTank.x - target.x;
         var dy = localTank.y - target.y;
         var dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < 0.0001) return { x: target.x, y: target.y };
-
-        // Assume enemy is approaching us at max tank speed.
-        var approachPerStep = constants.TANK_MAX_SPEED * dt;
-        var move = Math.min(dist, step * approachPerStep);
-        var ux = dx / dist;
-        var uy = dy / dist;
-
+        if (dist < 0.0001) {
+            return {
+                tx: target.x,
+                ty: target.y,
+                dist: 0,
+                ux: 0,
+                uy: 0,
+                approachPerStep: constants.TANK_MAX_SPEED * dt,
+                fixed: true,
+            };
+        }
         return {
-            x: target.x + ux * move,
-            y: target.y + uy * move,
+            tx: target.x,
+            ty: target.y,
+            dist: dist,
+            ux: dx / dist,
+            uy: dy / dist,
+            approachPerStep: constants.TANK_MAX_SPEED * dt,
+            fixed: false,
         };
     }
 
-    function evaluatePath(path, target) {
+    function evaluatePath(path, predictor) {
         var hitRadius = 26;
         var hitRadiusSq = hitRadius * hitRadius;
         var nearRadius = 180;
         var nearRadiusSq = nearRadius * nearRadius;
         var score = 0;
         var bestStep = Infinity;
+        var pathLen = path.length;
 
-        for (var step = 0; step < path.length; step += 2) {
+        for (var step = 0; step < pathLen; step += 2) {
             var bx = path[step].x;
             var by = path[step].y;
-            var pred = predictedTargetPosAtStep(target, step);
-            var dx = bx - pred.x;
-            var dy = by - pred.y;
+            var predX = predictor.tx;
+            var predY = predictor.ty;
+            if (!predictor.fixed) {
+                var move = Math.min(predictor.dist, step * predictor.approachPerStep);
+                predX += predictor.ux * move;
+                predY += predictor.uy * move;
+            }
+            var dx = bx - predX;
+            var dy = by - predY;
             var dist2 = dx * dx + dy * dy;
             var decay = 1 / (1 + step * 0.03);
 
@@ -2832,12 +2876,19 @@ t.exports.findAutoKillShot = function (args) {
         return { score: score, earliestHit: bestStep };
     }
 
-    function minPathDistSqToTarget(path, target) {
+    function minPathDistSqToTarget(path, predictor) {
         var best = Infinity;
-        for (var i = 0; i < path.length; i += 3) {
-            var pred = predictedTargetPosAtStep(target, i);
-            var dx = path[i].x - pred.x;
-            var dy = path[i].y - pred.y;
+        var pathLen = path.length;
+        for (var i = 0; i < pathLen; i += 3) {
+            var predX = predictor.tx;
+            var predY = predictor.ty;
+            if (!predictor.fixed) {
+                var move = Math.min(predictor.dist, i * predictor.approachPerStep);
+                predX += predictor.ux * move;
+                predY += predictor.uy * move;
+            }
+            var dx = path[i].x - predX;
+            var dy = path[i].y - predY;
             var d2 = dx * dx + dy * dy;
             if (d2 < best) best = d2;
         }
@@ -2881,21 +2932,24 @@ t.exports.findAutoKillShot = function (args) {
     }
 
     var angles = generateCandidateAngles(target);
+    var targetPredictor = getTargetPredictor(target);
     var best = null;
     var scoredCandidates = [];
 
     for (var i = 0; i < angles.length; i++) {
         var angle = angles[i];
-        var spawnX = localTank.x + 40 * Math.cos(angle);
-        var spawnY = localTank.y + 40 * Math.sin(angle);
+        var ca = Math.cos(angle);
+        var sa = Math.sin(angle);
+        var spawnX = localTank.x + 40 * ca;
+        var spawnY = localTank.y + 40 * sa;
         if (!physics.canBulletBeSpawned(localTank, spawnX, spawnY, maze)) continue;
 
         var path = simulateBulletPath(constants, spawnX, spawnY, angle, maze, ttlSteps);
         if (!path || path.length < 30) continue;
         if (isSelfUnsafe(path)) continue;
 
-        var evalHit = evaluatePath(path, target);
-        var minTargetD2 = minPathDistSqToTarget(path, target);
+        var evalHit = evaluatePath(path, targetPredictor);
+        var minTargetD2 = minPathDistSqToTarget(path, targetPredictor);
         var minTargetD = Math.sqrt(minTargetD2);
         var pressureNearScore = Math.max(0, 1 - minTargetD / 820);
         if (evalHit.score <= 0 && pressureNearScore < 0.32) continue;
@@ -4075,23 +4129,26 @@ function(t, e, a) {
     function rebuildBulletThreatGrid() {
         _bulletThreatGrid = Object.create(null);
         if (!_cachedBulletPaths || !_cachedBulletPaths.length) return;
+        var cellSize = _bulletThreatCellSize;
+        var grid = _bulletThreatGrid;
 
         for (var i = 0; i < _cachedBulletPaths.length; i++) {
             var entry = _cachedBulletPaths[i];
             if (!entry || entry.ignoreForDodge) continue;
             var path = entry.path;
-            if (!path || path.length < 2) continue;
+            var pathLen = path && path.length;
+            if (!pathLen || pathLen < 2) continue;
 
-            var maxStep = Math.min(path.length, 130);
+            var maxStep = pathLen < 130 ? pathLen : 130;
             for (var s = 0; s < maxStep; s += 2) {
                 var pt = path[s];
-                var cx = (pt.x / _bulletThreatCellSize) | 0;
-                var cy = (pt.y / _bulletThreatCellSize) | 0;
+                var cx = (pt.x / cellSize) | 0;
+                var cy = (pt.y / cellSize) | 0;
                 var key = cx + ":" + cy;
-                var bucket = _bulletThreatGrid[key];
+                var bucket = grid[key];
                 if (!bucket) {
                     bucket = [];
-                    _bulletThreatGrid[key] = bucket;
+                    grid[key] = bucket;
                 }
                 bucket.push({ x: pt.x, y: pt.y, s: s });
             }
@@ -4536,24 +4593,30 @@ function(t, e, a) {
     }
 
     function applyShootInputs(deltaTime, inputs) {
+        var localTank = tanks[0];
+        var bulletSpeed = constants.TANK_MAX_SPEED * 1.2;
         for (var i = 0; i < inputs.length; i++) {
             var currentTick;
 
             if (inputs[i].mouseClicked) {
                 currentTick = inputs[i].tickNum;
-                if (!tanks[0].beenHit && bulletsSpawnedCount < maxBullets && currentTick - lastShotTick > 2) {
-                    var spawnX = tanks[0].x + 40 * Math.cos(tanks[0].angle);
-                    var spawnY = tanks[0].y + 40 * Math.sin(tanks[0].angle);
+                if (!localTank.beenHit && bulletsSpawnedCount < maxBullets && currentTick - lastShotTick > 2) {
+                    var angle = localTank.angle;
+                    var cosA = Math.cos(angle);
+                    var sinA = Math.sin(angle);
+                    var spawnX = localTank.x + 40 * cosA;
+                    var spawnY = localTank.y + 40 * sinA;
 
-                    if (physics.canBulletBeSpawned(tanks[0], spawnX, spawnY, maze)) {
-                        var dirX = Math.cos(tanks[0].angle);
-                        var dirY = Math.sin(tanks[0].angle);
+                    if (physics.canBulletBeSpawned(localTank, spawnX, spawnY, maze)) {
+                        var dirX = cosA;
+                        var dirY = sinA;
                         var magnitude = Math.sqrt(dirX * dirX + dirY * dirY);
-                        var bulletVelX = (dirX / magnitude) * constants.TANK_MAX_SPEED * 1.2;
-                        var bulletVelY = (dirY / magnitude) * constants.TANK_MAX_SPEED * 1.2;
+                        var bulletVelX = (dirX / magnitude) * bulletSpeed;
+                        var bulletVelY = (dirY / magnitude) * bulletSpeed;
                         var newBullet = new Bullet(nextBulletId, spawnX, spawnY, bulletVelX, bulletVelY);
-                        newBullet.fireTime = Date.now();
-                        newBullet.ignoreForDodgeUntil = Date.now() + 450;
+                        var now = Date.now();
+                        newBullet.fireTime = now;
+                        newBullet.ignoreForDodgeUntil = now + 450;
                         nextBulletId--;
                         bullets.push(newBullet);
                         onBulletFired(inputs[i].tickNum);
@@ -4791,15 +4854,19 @@ function(t, e, a) {
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
         // Draw wall tiles
+        var dpr = window.devicePixelRatio || 1;
+        var camLeft = camera.camLeft;
+        var camTop = camera.camTop;
+        var canvasWidth = canvas.width;
+        var canvasHeight = canvas.height;
         for (var i = 0; i < wallCornerSprites.length; i++) {
             var sprite = wallSprites[wallCornerSprites[i].weight];
-            var dpr = window.devicePixelRatio || 1;
             var spriteW = sprite.width / dpr;
             var spriteH = sprite.height / dpr;
-            var drawX = Math.floor(100 * wallCornerSprites[i].x - camera.camLeft - 0.5 * spriteW);
-            var drawY = Math.floor(100 * wallCornerSprites[i].y - camera.camTop - 0.5 * spriteH);
+            var drawX = Math.floor(100 * wallCornerSprites[i].x - camLeft - 0.5 * spriteW);
+            var drawY = Math.floor(100 * wallCornerSprites[i].y - camTop - 0.5 * spriteH);
 
-            if (drawX + spriteW > 0 && drawX < canvas.width && drawY + spriteH > 0 && drawY < canvas.height)
+            if (drawX + spriteW > 0 && drawX < canvasWidth && drawY + spriteH > 0 && drawY < canvasHeight)
                 ctx.drawImage(sprite, drawX, drawY, spriteW, spriteH);
         }
 
@@ -4903,19 +4970,21 @@ function(t, e, a) {
                 }
             } else {
                 var arrowAngle = Math.atan2(diffY, diffX);
+                var arrowCos = Math.cos(arrowAngle);
+                var arrowSin = Math.sin(arrowAngle);
                 var arrowX = diffX + 0.5 * canvas.clientWidth;
                 var arrowY = diffY + 0.5 * canvas.clientHeight;
 
                 if (offScreenX)
-                    arrowX = diffX < 0 ? 20 - 10 * Math.cos(arrowAngle) : canvas.clientWidth - 20 - 10 * Math.cos(arrowAngle);
+                    arrowX = diffX < 0 ? 20 - 10 * arrowCos : canvas.clientWidth - 20 - 10 * arrowCos;
                 if (offScreenY)
-                    arrowY = diffY < 0 ? 20 - 10 * Math.sin(arrowAngle) : canvas.clientHeight - 20 - 10 * Math.sin(arrowAngle);
+                    arrowY = diffY < 0 ? 20 - 10 * arrowSin : canvas.clientHeight - 20 - 10 * arrowSin;
 
                 ctx.save();
                 ctx.translate(arrowX, arrowY);
                 ctx.fillStyle = "#ffbb00";
                 ctx.font = "30px Anton";
-                ctx.fillText("\uD83D\uDC51", -20 - 40 * Math.cos(arrowAngle), 40 * -Math.sin(arrowAngle));
+                ctx.fillText("\uD83D\uDC51", -20 - 40 * arrowCos, 40 * -arrowSin);
                 ctx.rotate(arrowAngle + 0.5 * Math.PI);
                 ctx.beginPath();
                 ctx.moveTo(0, -10);
@@ -4941,8 +5010,11 @@ function(t, e, a) {
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
 
-        var ammoX = 0.5 * canvas.clientWidth + -32 * Math.cos(tanks[0].angle);
-        var ammoY = 0.5 * canvas.clientHeight + -32 * Math.sin(tanks[0].angle);
+        var tankAngle = tanks[0].angle;
+        var tankCos = Math.cos(tankAngle);
+        var tankSin = Math.sin(tankAngle);
+        var ammoX = 0.5 * canvas.clientWidth + -32 * tankCos;
+        var ammoY = 0.5 * canvas.clientHeight + -32 * tankSin;
 
         ctx.beginPath();
         ctx.arc(ammoX - 7, ammoY, 3, 0, 2 * Math.PI);

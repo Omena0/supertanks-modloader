@@ -1,7 +1,7 @@
 {
   "id": "superhax",
   "name": "SuperHax",
-  "description": "Features: SmartAim, ControlMove, Trajectories, Minimap, AutoDodge, AutoKill, Pathfind, AutoRespawn",
-  "version": "1.2.3",
+  "description": "Features: SmartAim, ControlMove, Trajectories,\nMinimap, AutoDodge, AutoKill,\nPathfind, AutoRespawn, Optimizations",
+  "version": "1.3.0",
   "config": {}
 }

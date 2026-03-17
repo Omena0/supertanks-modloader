@@ -19,16 +19,20 @@ module.exports.drawBulletPredictions = function (ctx, cam, mazeData, cachedBulle
     if (!mazeData.cellsAcross) return;
     ctx.save();
     var DANGER_DIST = 25;
+    var DANGER_DIST_SQ = DANGER_DIST * DANGER_DIST;
+    var camLeft = cam.camLeft;
+    var camTop = cam.camTop;
     for (var i = 0; i < cachedBulletPaths.length; i++) {
         var entry = cachedBulletPaths[i];
         var b = entry.bullet;
         var path = entry.path;
+        var pathLen = path.length;
 
         var willHitPlayer = false;
-        for (var c = 0; c < path.length; c++) {
+        for (var c = 0; c < pathLen; c++) {
             var hdx = path[c].x - playerX;
             var hdy = path[c].y - playerY;
-            if (Math.sqrt(hdx * hdx + hdy * hdy) < DANGER_DIST) {
+            if (hdx * hdx + hdy * hdy < DANGER_DIST_SQ) {
                 willHitPlayer = true;
                 break;
             }
@@ -36,20 +40,20 @@ module.exports.drawBulletPredictions = function (ctx, cam, mazeData, cachedBulle
 
         if (willHitPlayer) {
             ctx.beginPath();
-            ctx.arc(b.x - cam.camLeft, b.y - cam.camTop, 12, 0, 2 * Math.PI);
+            ctx.arc(b.x - camLeft, b.y - camTop, 12, 0, 2 * Math.PI);
             ctx.lineWidth = 2.5;
             ctx.strokeStyle = "rgba(255, 0, 0, 0.8)";
             ctx.stroke();
         }
 
-        var prevX = b.x - cam.camLeft, prevY = b.y - cam.camTop;
-        for (var s = 0; s < path.length; s++) {
-            var t = s / path.length;
+        var prevX = b.x - camLeft, prevY = b.y - camTop;
+        for (var s = 0; s < pathLen; s++) {
+            var t = s / pathLen;
             var lw = 4 * (1 - t) + 0.5;
             ctx.beginPath();
             ctx.moveTo(prevX, prevY);
-            prevX = path[s].x - cam.camLeft;
-            prevY = path[s].y - cam.camTop;
+            prevX = path[s].x - camLeft;
+            prevY = path[s].y - camTop;
             ctx.lineTo(prevX, prevY);
             ctx.lineWidth = lw;
             ctx.strokeStyle = "rgba(255, 50, 50, " + (0.35 * (1 - t) + 0.05) + ")";

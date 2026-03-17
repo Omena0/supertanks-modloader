@@ -1,3 +1,4 @@
+(function(){try{if(!globalThis.mod_config)globalThis.mod_config={};Object.assign(globalThis.mod_config,{});}catch(e){console.warn("Failed to set globalThis.mod_config",e);}})();
 function _classCallCheck(instance, Constructor) {
     if (!(instance instanceof Constructor)) throw new TypeError("Cannot call a class as a function");
 }
@@ -2623,34 +2624,37 @@ function(t, e, a) {
     }
 
     function applyShootInputs(deltaTime, inputs) {
+        var localTank = tanks[0];
+        var bulletSpeed = constants.TANK_MAX_SPEED * 1.2;
         for (var i = 0; i < inputs.length; i++) {
             var currentTick;
 
             if (inputs[i].mouseClicked) {
                 currentTick = inputs[i].tickNum;
                 if (
-                    !tanks[0].beenHit &&
+                    !localTank.beenHit &&
                     bulletsSpawnedCount < maxBullets &&
                     currentTick - lastShotTick > 2
                 ) {
-                    var spawnX = tanks[0].x + 40 * Math.cos(tanks[0].angle);
-                    var spawnY = tanks[0].y + 40 * Math.sin(tanks[0].angle);
+                    var angle = localTank.angle;
+                    var cosA = Math.cos(angle);
+                    var sinA = Math.sin(angle);
+                    var spawnX = localTank.x + 40 * cosA;
+                    var spawnY = localTank.y + 40 * sinA;
 
                     if (
                         physics.canBulletBeSpawned(
-                            tanks[0],
+                            localTank,
                             spawnX,
                             spawnY,
                             maze,
                         )
                     ) {
-                        var dirX = Math.cos(tanks[0].angle);
-                        var dirY = Math.sin(tanks[0].angle);
+                        var dirX = cosA;
+                        var dirY = sinA;
                         var magnitude = Math.sqrt(dirX * dirX + dirY * dirY);
-                        var bulletVelX =
-                            (dirX / magnitude) * constants.TANK_MAX_SPEED * 1.2;
-                        var bulletVelY =
-                            (dirY / magnitude) * constants.TANK_MAX_SPEED * 1.2;
+                        var bulletVelX = (dirX / magnitude) * bulletSpeed;
+                        var bulletVelY = (dirY / magnitude) * bulletSpeed;
                         var newBullet = new Bullet(
                             nextBulletId,
                             spawnX,
@@ -2905,23 +2909,27 @@ function(t, e, a) {
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
         // Draw wall tiles
+        var dpr = window.devicePixelRatio || 1;
+        var camLeft = camera.camLeft;
+        var camTop = camera.camTop;
+        var canvasWidth = canvas.width;
+        var canvasHeight = canvas.height;
         for (var i = 0; i < wallCornerSprites.length; i++) {
             var sprite = wallSprites[wallCornerSprites[i].weight];
-            var dpr = window.devicePixelRatio || 1;
             var spriteW = sprite.width / dpr;
             var spriteH = sprite.height / dpr;
             var drawX = Math.floor(
-                100 * wallCornerSprites[i].x - camera.camLeft - 0.5 * spriteW,
+                100 * wallCornerSprites[i].x - camLeft - 0.5 * spriteW,
             );
             var drawY = Math.floor(
-                100 * wallCornerSprites[i].y - camera.camTop - 0.5 * spriteH,
+                100 * wallCornerSprites[i].y - camTop - 0.5 * spriteH,
             );
 
             if (
                 drawX + spriteW > 0 &&
-                drawX < canvas.width &&
+                drawX < canvasWidth &&
                 drawY + spriteH > 0 &&
-                drawY < canvas.height
+                drawY < canvasHeight
             )
                 ctx.drawImage(sprite, drawX, drawY, spriteW, spriteH);
         }
@@ -3055,23 +3063,25 @@ function(t, e, a) {
             } else {
                 // Draw off-screen king arrow indicator
                 var arrowAngle = Math.atan2(diffY, diffX);
+                var arrowCos = Math.cos(arrowAngle);
+                var arrowSin = Math.sin(arrowAngle);
                 var arrowX = diffX + 0.5 * canvas.clientWidth;
                 var arrowY = diffY + 0.5 * canvas.clientHeight;
 
                 if (offScreenX)
                     arrowX =
                         diffX < 0
-                            ? 20 - 10 * Math.cos(arrowAngle)
+                            ? 20 - 10 * arrowCos
                             : canvas.clientWidth -
                             20 -
-                            10 * Math.cos(arrowAngle);
+                            10 * arrowCos;
                 if (offScreenY)
                     arrowY =
                         diffY < 0
-                            ? 20 - 10 * Math.sin(arrowAngle)
+                            ? 20 - 10 * arrowSin
                             : canvas.clientHeight -
                             20 -
-                            10 * Math.sin(arrowAngle);
+                            10 * arrowSin;
 
                 ctx.save();
                 ctx.translate(arrowX, arrowY);
@@ -3079,8 +3089,8 @@ function(t, e, a) {
                 ctx.font = "30px Anton";
                 ctx.fillText(
                     "\uD83D\uDC51",
-                    -20 - 40 * Math.cos(arrowAngle),
-                    40 * -Math.sin(arrowAngle),
+                    -20 - 40 * arrowCos,
+                    40 * -arrowSin,
                 );
                 ctx.rotate(arrowAngle + 0.5 * Math.PI);
                 ctx.beginPath();
@@ -3107,8 +3117,11 @@ function(t, e, a) {
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
 
-        var ammoX = 0.5 * canvas.clientWidth + -32 * Math.cos(tanks[0].angle);
-        var ammoY = 0.5 * canvas.clientHeight + -32 * Math.sin(tanks[0].angle);
+        var tankAngle = tanks[0].angle;
+        var tankCos = Math.cos(tankAngle);
+        var tankSin = Math.sin(tankAngle);
+        var ammoX = 0.5 * canvas.clientWidth + -32 * tankCos;
+        var ammoY = 0.5 * canvas.clientHeight + -32 * tankSin;
 
         ctx.beginPath();
         ctx.arc(ammoX - 7, ammoY, 3, 0, 2 * Math.PI);

@@ -41,6 +41,16 @@ module.exports.findAutoKillShot = function (args) {
     var dt = constants.PHYSICS_INTERVAL;
     var ttlSteps = Math.ceil(9000 / dt);
     var quant = (2 * Math.PI) / 720;
+    var DIR8 = [
+        { c: 1, s: 0 },
+        { c: 0.7071067811865476, s: 0.7071067811865476 },
+        { c: 0, s: 1 },
+        { c: -0.7071067811865476, s: 0.7071067811865476 },
+        { c: -1, s: 0 },
+        { c: -0.7071067811865476, s: -0.7071067811865476 },
+        { c: 0, s: -1 },
+        { c: 0.7071067811865476, s: -0.7071067811865476 },
+    ];
 
     function normAngle(a) {
         while (a <= -Math.PI) a += 2 * Math.PI;
@@ -87,16 +97,17 @@ module.exports.findAutoKillShot = function (args) {
     }
 
     function localOpenAreaScore(px, py) {
-        var dirs = 8;
         var maxProbe = 260;
         var step = 26;
         var sum = 0;
+        var dirs = DIR8.length;
         for (var i = 0; i < dirs; i++) {
-            var a = (i / dirs) * 2 * Math.PI - Math.PI;
+            var dc = DIR8[i].c;
+            var ds = DIR8[i].s;
             var reached = 0;
             for (var d = step; d <= maxProbe; d += step) {
-                var qx = px + Math.cos(a) * d;
-                var qy = py + Math.sin(a) * d;
+                var qx = px + dc * d;
+                var qy = py + ds * d;
                 if (pointBlocked(qx, qy, 22)) break;
                 reached = d;
             }
@@ -117,12 +128,11 @@ module.exports.findAutoKillShot = function (args) {
     }
 
     function corridorNetworkDepth(px, py) {
-        var dirs = 8;
+        var dirs = DIR8.length;
         var freeDirs = 0;
         for (var i = 0; i < dirs; i++) {
-            var a = (i / dirs) * 2 * Math.PI - Math.PI;
-            var qx = px + Math.cos(a) * 90;
-            var qy = py + Math.sin(a) * 90;
+            var qx = px + DIR8[i].c * 90;
+            var qy = py + DIR8[i].s * 90;
             if (!pointBlocked(qx, qy, 20)) freeDirs++;
         }
         return freeDirs / dirs;
@@ -197,7 +207,8 @@ module.exports.findAutoKillShot = function (args) {
 
     function estimateBounceCount(path) {
         var bounces = 0;
-        for (var i = 1; i < path.length; i++) {
+        var len = path.length;
+        for (var i = 1; i < len; i++) {
             var pv = path[i - 1];
             var cv = path[i];
             if ((pv.vx > 0 && cv.vx < 0) || (pv.vx < 0 && cv.vx > 0)) bounces++;
@@ -209,7 +220,8 @@ module.exports.findAutoKillShot = function (args) {
     function pathCoverage(path) {
         var seenCells = {};
         var count = 0;
-        for (var i = 0; i < path.length; i += 6) {
+        var len = path.length;
+        for (var i = 0; i < len; i += 6) {
             var cx = Math.floor(path[i].x / 100);
             var cy = Math.floor(path[i].y / 100);
             var key = cx + ":" + cy;
@@ -239,7 +251,8 @@ module.exports.findAutoKillShot = function (args) {
     function similarActiveStats(path) {
         var best = 0;
         var count = 0;
-        for (var i = 0; i < activeBulletPaths.length; i++) {
+        var len = activeBulletPaths.length;
+        for (var i = 0; i < len; i++) {
             var other = activeBulletPaths[i] && activeBulletPaths[i].path;
             if (!other || other.length < 5) continue;
             var sim = pathSimilarity(path, other);
@@ -259,7 +272,8 @@ module.exports.findAutoKillShot = function (args) {
         var arr = _laneShotMemory[key];
         if (!arr || arr.length === 0) return 0;
         var kept = [];
-        for (var i = 0; i < arr.length; i++) {
+        var len = arr.length;
+        for (var i = 0; i < len; i++) {
             if (nowTick - arr[i] <= windowTicks) kept.push(arr[i]);
         }
         _laneShotMemory[key] = kept;
@@ -288,38 +302,53 @@ module.exports.findAutoKillShot = function (args) {
         return false;
     }
 
-    function predictedTargetPosAtStep(target, step) {
+    function getTargetPredictor(target) {
         var dx = localTank.x - target.x;
         var dy = localTank.y - target.y;
         var dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist < 0.0001) return { x: target.x, y: target.y };
-
-        // Assume enemy is approaching us at max tank speed.
-        var approachPerStep = constants.TANK_MAX_SPEED * dt;
-        var move = Math.min(dist, step * approachPerStep);
-        var ux = dx / dist;
-        var uy = dy / dist;
-
+        if (dist < 0.0001) {
+            return {
+                tx: target.x,
+                ty: target.y,
+                dist: 0,
+                ux: 0,
+                uy: 0,
+                approachPerStep: constants.TANK_MAX_SPEED * dt,
+                fixed: true,
+            };
+        }
         return {
-            x: target.x + ux * move,
-            y: target.y + uy * move,
+            tx: target.x,
+            ty: target.y,
+            dist: dist,
+            ux: dx / dist,
+            uy: dy / dist,
+            approachPerStep: constants.TANK_MAX_SPEED * dt,
+            fixed: false,
         };
     }
 
-    function evaluatePath(path, target) {
+    function evaluatePath(path, predictor) {
         var hitRadius = 26;
         var hitRadiusSq = hitRadius * hitRadius;
         var nearRadius = 180;
         var nearRadiusSq = nearRadius * nearRadius;
         var score = 0;
         var bestStep = Infinity;
+        var pathLen = path.length;
 
-        for (var step = 0; step < path.length; step += 2) {
+        for (var step = 0; step < pathLen; step += 2) {
             var bx = path[step].x;
             var by = path[step].y;
-            var pred = predictedTargetPosAtStep(target, step);
-            var dx = bx - pred.x;
-            var dy = by - pred.y;
+            var predX = predictor.tx;
+            var predY = predictor.ty;
+            if (!predictor.fixed) {
+                var move = Math.min(predictor.dist, step * predictor.approachPerStep);
+                predX += predictor.ux * move;
+                predY += predictor.uy * move;
+            }
+            var dx = bx - predX;
+            var dy = by - predY;
             var dist2 = dx * dx + dy * dy;
             var decay = 1 / (1 + step * 0.03);
 
@@ -340,12 +369,19 @@ module.exports.findAutoKillShot = function (args) {
         return { score: score, earliestHit: bestStep };
     }
 
-    function minPathDistSqToTarget(path, target) {
+    function minPathDistSqToTarget(path, predictor) {
         var best = Infinity;
-        for (var i = 0; i < path.length; i += 3) {
-            var pred = predictedTargetPosAtStep(target, i);
-            var dx = path[i].x - pred.x;
-            var dy = path[i].y - pred.y;
+        var pathLen = path.length;
+        for (var i = 0; i < pathLen; i += 3) {
+            var predX = predictor.tx;
+            var predY = predictor.ty;
+            if (!predictor.fixed) {
+                var move = Math.min(predictor.dist, i * predictor.approachPerStep);
+                predX += predictor.ux * move;
+                predY += predictor.uy * move;
+            }
+            var dx = path[i].x - predX;
+            var dy = path[i].y - predY;
             var d2 = dx * dx + dy * dy;
             if (d2 < best) best = d2;
         }
@@ -389,21 +425,24 @@ module.exports.findAutoKillShot = function (args) {
     }
 
     var angles = generateCandidateAngles(target);
+    var targetPredictor = getTargetPredictor(target);
     var best = null;
     var scoredCandidates = [];
 
     for (var i = 0; i < angles.length; i++) {
         var angle = angles[i];
-        var spawnX = localTank.x + 40 * Math.cos(angle);
-        var spawnY = localTank.y + 40 * Math.sin(angle);
+        var ca = Math.cos(angle);
+        var sa = Math.sin(angle);
+        var spawnX = localTank.x + 40 * ca;
+        var spawnY = localTank.y + 40 * sa;
         if (!physics.canBulletBeSpawned(localTank, spawnX, spawnY, maze)) continue;
 
         var path = simulateBulletPath(constants, spawnX, spawnY, angle, maze, ttlSteps);
         if (!path || path.length < 30) continue;
         if (isSelfUnsafe(path)) continue;
 
-        var evalHit = evaluatePath(path, target);
-        var minTargetD2 = minPathDistSqToTarget(path, target);
+        var evalHit = evaluatePath(path, targetPredictor);
+        var minTargetD2 = minPathDistSqToTarget(path, targetPredictor);
         var minTargetD = Math.sqrt(minTargetD2);
         var pressureNearScore = Math.max(0, 1 - minTargetD / 820);
         if (evalHit.score <= 0 && pressureNearScore < 0.32) continue;
