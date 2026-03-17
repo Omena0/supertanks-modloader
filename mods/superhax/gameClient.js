@@ -95,21 +95,152 @@
     var _pathfindRecalcTick = 0;
     var _bulletThreatGrid = Object.create(null);
     var _bulletThreatCellSize = 44;
+    var _bulletCacheWorker = null;
+    var _bulletCacheWorkerBusy = false;
+    var _bulletCacheWorkerEnabled = false;
+    var _bulletCacheRequestId = 0;
+    var _bulletCacheAppliedId = 0;
+    var _bulletThreatGridDirty = true;
+
+    function initBulletCacheWorker() {
+        if (_bulletCacheWorker || typeof Worker === "undefined" || typeof Blob === "undefined" || typeof URL === "undefined") return;
+        try {
+            var workerSource = "(function(){" +
+                "function simulatePath(constants,startX,startY,angle,mazeData,maxSteps){" +
+                "var bulletSpeed=constants.TANK_MAX_SPEED*1.2;var dt=constants.PHYSICS_INTERVAL;" +
+                "var bx=startX,by=startY;var vx=Math.cos(angle)*bulletSpeed;var vy=Math.sin(angle)*bulletSpeed;var path=[];" +
+                "for(var step=0;step<maxSteps;step++){" +
+                "bx+=vx*dt;by+=vy*dt;var bounced=false;" +
+                "if(bx+9>mazeData.worldWidth){bx=mazeData.worldWidth-9;vx*=-1;bounced=true;}else if(bx-9<0){bx=9;vx*=-1;bounced=true;}" +
+                "if(by+9>mazeData.worldHeight){by=mazeData.worldHeight-9;vy*=-1;bounced=true;}else if(by-9<0){by=9;vy*=-1;bounced=true;}" +
+                "if(!bounced&&mazeData.cellsAcross){" +
+                "var cellX=Math.floor(bx/100);var cellY=Math.floor(by/100);var modX=bx%100,modY=by%100;" +
+                "var nearL=modX<9,nearR=modX>91,nearT=modY<9,nearB=modY>91;" +
+                "if(nearT&&nearL&&1==mazeData.wallCorners[cellY*(mazeData.cellsAcross+1)+cellX]){" +
+                "if(vx*(modY-9)-vy*(modX-9)<0){vy*=-1;by=100*cellY+9;}else{vx*=-1;bx=100*cellX+9;}}" +
+                "else if(nearT&&nearR&&1==mazeData.wallCorners[cellY*(mazeData.cellsAcross+1)+(cellX+1)]){" +
+                "if(vx*(modY-9)-vy*(modX-91)>0){vy*=-1;by=100*cellY+9;}else{vx*=-1;bx=100*cellX+91;}}" +
+                "else if(nearB&&nearL&&1==mazeData.wallCorners[(cellY+1)*(mazeData.cellsAcross+1)+cellX]){" +
+                "if(vx*(modY-91)-vy*(modX-9)>0){vy*=-1;by=100*cellY+91;}else{vx*=-1;bx=100*cellX+9;}}" +
+                "else if(nearB&&nearR&&1==mazeData.wallCorners[(cellY+1)*(mazeData.cellsAcross+1)+(cellX+1)]){" +
+                "if(vx*(modY-91)-vy*(modX-91)<0){vy*=-1;by=100*cellY+91;}else{vx*=-1;bx=100*cellX+91;}}" +
+                "else if(nearB&&1==mazeData.horisontalWalls[(cellY+1)*mazeData.cellsAcross+cellX]){vy*=-1;by=100*cellY+91;}" +
+                "else if(nearT&&1==mazeData.horisontalWalls[cellY*mazeData.cellsAcross+cellX]){vy*=-1;by=100*cellY+9;}" +
+                "else if(nearL&&1==mazeData.verticalWalls[cellY*(mazeData.cellsAcross+1)+cellX]){vx*=-1;bx=100*cellX+9;}" +
+                "else if(nearR&&1==mazeData.verticalWalls[cellY*(mazeData.cellsAcross+1)+(cellX+1)]){vx*=-1;bx=100*cellX+91;}" +
+                "}" +
+                "path.push({x:bx,y:by,vx:vx,vy:vy,step:step});}" +
+                "return path;}" +
+                "self.onmessage=function(ev){var d=ev.data||{};var bullets=d.bullets||[];var out=[];" +
+                "for(var i=0;i<bullets.length;i++){var b=bullets[i];if(!b)continue;" +
+                "var path=simulatePath(d.constants,b.x,b.y,Math.atan2(b.yVel,b.xVel),d.mazeData,b.stepsLeft);" +
+                "out.push({id:b.id,path:path,ignoreForDodge:b.ignoreForDodge});}" +
+                "self.postMessage({requestId:d.requestId,entries:out});};" +
+                "})();";
+            var blob = new Blob([workerSource], { type: "application/javascript" });
+            var url = URL.createObjectURL(blob);
+            _bulletCacheWorker = new Worker(url);
+            URL.revokeObjectURL(url);
+
+            _bulletCacheWorker.onmessage = function (ev) {
+                var data = ev && ev.data ? ev.data : null;
+                _bulletCacheWorkerBusy = false;
+                if (!data || !data.entries) return;
+                if (data.requestId <= _bulletCacheAppliedId) return;
+                _bulletCacheAppliedId = data.requestId;
+
+                var idBuckets = Object.create(null);
+                for (var bi = 0; bi < bullets.length; bi++) {
+                    var b = bullets[bi];
+                    var key = String(b.id);
+                    if (!idBuckets[key]) idBuckets[key] = [];
+                    idBuckets[key].push(b);
+                }
+
+                var rebuilt = [];
+                for (var i = 0; i < data.entries.length; i++) {
+                    var e = data.entries[i];
+                    var bucket = idBuckets[String(e.id)];
+                    if (!bucket || !bucket.length) continue;
+                    var bulletRef = bucket.shift();
+                    rebuilt.push({ path: e.path, bullet: bulletRef, ignoreForDodge: !!e.ignoreForDodge });
+                }
+
+                _cachedBulletPaths = rebuilt;
+                _bulletThreatGridDirty = true;
+            };
+
+            _bulletCacheWorker.onerror = function () {
+                _bulletCacheWorkerEnabled = false;
+                _bulletCacheWorkerBusy = false;
+            };
+
+            _bulletCacheWorkerEnabled = true;
+        } catch (e) {
+            _bulletCacheWorkerEnabled = false;
+            _bulletCacheWorkerBusy = false;
+        }
+    }
 
     // === BULLET PATH CACHE: computed once per tick, shared across systems ===
     function updateBulletPathCache(mazeData) {
-        _cachedBulletPaths = bulletLinesMod.updateBulletPathCache(
-            bullets,
-            mazeData,
-            constants,
-            smartAimMod.simulateBulletPath
-        );
-        rebuildBulletThreatGrid();
+        if (!mazeData.cellsAcross) {
+            _cachedBulletPaths = [];
+            _bulletThreatGrid = Object.create(null);
+            _bulletThreatGridDirty = false;
+            return;
+        }
+
+        if (_bulletCacheWorkerEnabled && _bulletCacheWorker && !_bulletCacheWorkerBusy) {
+            var now = Date.now();
+            var bulletPayload = [];
+            for (var i = 0; i < bullets.length; i++) {
+                var b = bullets[i];
+                var remainingTTL = b.timeToLive !== undefined ? b.timeToLive : 9000;
+                if (b.fireTime) remainingTTL = 9000 - (now - b.fireTime);
+                if (remainingTTL <= 0) continue;
+                var stepsLeft = Math.ceil(remainingTTL / constants.PHYSICS_INTERVAL);
+                bulletPayload.push({
+                    id: b.id,
+                    x: b.x,
+                    y: b.y,
+                    xVel: b.xVel,
+                    yVel: b.yVel,
+                    stepsLeft: stepsLeft,
+                    ignoreForDodge: !!(b.ignoreForDodgeUntil && now < b.ignoreForDodgeUntil),
+                });
+            }
+
+            _bulletCacheWorkerBusy = true;
+            _bulletCacheRequestId++;
+            _bulletCacheWorker.postMessage({
+                requestId: _bulletCacheRequestId,
+                bullets: bulletPayload,
+                mazeData: mazeData,
+                constants: constants,
+            });
+        }
+
+        // Fallback path (or initial warm-up before first worker result).
+        if (!_bulletCacheWorkerEnabled || _cachedBulletPaths.length === 0) {
+            _cachedBulletPaths = bulletLinesMod.updateBulletPathCache(
+                bullets,
+                mazeData,
+                constants,
+                smartAimMod.simulateBulletPath
+            );
+            _bulletThreatGridDirty = true;
+        }
+
+        if (_bulletThreatGridDirty) rebuildBulletThreatGrid();
     }
 
     function rebuildBulletThreatGrid() {
         _bulletThreatGrid = Object.create(null);
-        if (!_cachedBulletPaths || !_cachedBulletPaths.length) return;
+        if (!_cachedBulletPaths || !_cachedBulletPaths.length) {
+            _bulletThreatGridDirty = false;
+            return;
+        }
         var cellSize = _bulletThreatCellSize;
         var grid = _bulletThreatGrid;
 
@@ -134,6 +265,7 @@
                 bucket.push({ x: pt.x, y: pt.y, s: s });
             }
         }
+        _bulletThreatGridDirty = false;
     }
 
     function clearPathfindTarget() {
@@ -441,6 +573,7 @@
 
         // === MOD: Create mod toggle panel ===
         createModPanel();
+        initBulletCacheWorker();
 
         tanks = [];
         tanks.push(new Tank(50, 50));
