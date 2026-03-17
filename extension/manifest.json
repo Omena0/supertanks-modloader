@@ -1,0 +1,25 @@
+{
+  "manifest_version": 2,
+  "name": "SuperTanks Mod Loader",
+  "version": "1.0",
+  "description": "Replaces supertanks.js with modded version",
+  "permissions": [
+    "storage",
+    "webRequest",
+    "webRequestBlocking",
+    "<all_urls>"
+  ],
+  "browser_action": {
+    "default_popup": "popup.html",
+    "default_title": "SuperTanks Mod Config"
+  },
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "web_accessible_resources": [
+    "supertanks.js",
+    "mods/index.json",
+    "mods/*/manifest.json",
+    "mods/*/supertanks.js"
+  ]
+}

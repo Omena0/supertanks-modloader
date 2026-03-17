@@ -1,0 +1,16 @@
+{
+  "mods": [
+    {
+      "id": "superhax",
+      "name": "SuperHax",
+      "description": "Features: SmartAim, ControlMove, Trajectories, Minimap, AutoDodge, AutoKill, Pathfind, AutoRespawn",
+      "version": "1.2.3"
+    },
+    {
+      "id": "vanilla",
+      "name": "Vanilla",
+      "description": "Vanilla unmodified supertanks.",
+      "version": "2.0.0"
+    }
+  ]
+}
