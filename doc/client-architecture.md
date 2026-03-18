@@ -90,6 +90,8 @@ Wraps the native `WebSocket` to provide:
 - `sendBinary(type, data)` — Send binary message prefixed with 1-byte type ID
 - Automatic routing of incoming messages by type (ArrayBuffer → binary handler, string → JSON handler)
 
+Important nuance: routing is based on the runtime type of `event.data` (`ArrayBuffer` vs string), not by checking whether a message starts with `{` or `[`. See `connection-auth.md`.
+
 ### bullet.js
 
 `Bullet(id, x, y, xVel, yVel)` constructor:

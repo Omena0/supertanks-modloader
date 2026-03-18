@@ -496,9 +496,6 @@ module.exports.findAutoKillShot = function (args) {
     scoredCandidates.sort(function (a, b) { return b.score - a.score; });
     _latestRankedPaths = scoredCandidates.slice(0, 20);
 
-    // DONT REMOVE
-    if (best) console.log(best.score)
-
     if (!best || best.score < 55) {
         // Fallback direct shot only when threat is nearby.
         if (!nearbyThreat) return null;

@@ -46,6 +46,31 @@ The client reads a `session_token` cookie from the browser and sends it in the `
 - The server uses the cookie for returning player identification (possibly preserving scores/stats across reconnects)
 - If no cookie is found, `null` is sent — the server likely creates a new session
 
+Clarifications from client implementation:
+
+- The token is sent in the **application payload** (`joinGame.sessionCookie`), not as a WebSocket protocol extension/auth header.
+- The client treats it as opaque and does not parse/decode it.
+- Since the game client reads it via `document.cookie`, this cookie is readable by page JavaScript in the game context.
+
+See also: `connection-auth.md` for a focused Q&A on transport type detection, handshake steps, endpoint discovery, and cookie handling.
+
+### Endpoint Discovery
+
+The game client itself does not hardcode the endpoint in `gameClient.js`; it accepts `serverUrl` from external bootstrap code and opens `new WebSocket(serverUrl)`.
+
+The only explicit endpoint string present in this workspace is in `custom_client/main.py`:
+
+- `wss://supertanks-app-production-eu.herokuapp.com/`
+
+Treat this as a known target used by the custom client script, not necessarily the only/authoritative production endpoint for every deployment.
+
+### Layered Handshake Summary
+
+1. Transport handshake: HTTP Upgrade to WebSocket (plus TLS for `wss://`).
+2. App handshake: client sends JSON `joinGame` with `{ name, sessionCookie }` on `onopen`.
+3. Server responds with `JOIN_SUCCESS` (identity + maze).
+4. Spawn phase via `spawnPlayer` and `playerSpawned`.
+
 ## Server Tick Model
 
 Based on the client constants and behavior:

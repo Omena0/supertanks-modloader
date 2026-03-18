@@ -7,6 +7,23 @@ All communication uses a single **WebSocket** connection per client. The protoco
 1. **JSON messages** — For infrequent, variable-structure events (join, kill, leaderboard)
 2. **Binary messages** — For high-frequency, fixed-structure game state (tank positions, bullet positions, player input)
 
+## How JSON vs Binary Is Distinguished
+
+The client does **not** inspect the first byte for `{"` or `[`.
+
+Dispatch is based on the runtime type of `event.data` in `socket.onmessage`:
+
+- If `event.data instanceof ArrayBuffer`: treat as binary, read byte 0 as `messageType`, and route payload `data.slice(1)` to numeric handlers.
+- Otherwise: treat as text, `JSON.parse(...)`, validate `[eventName, data]`, then route to string handlers.
+
+This behavior is implemented in `socketWrapper.js` (both vanilla and modded variants).
+
+Practical implication:
+
+- Binary framing starts with a 1-byte type header.
+- JSON framing starts as a text frame and is parsed as a 2-element array.
+- There is no ambiguity because WebSocket already preserves frame type (text vs binary).
+
 ## Message Framing
 
 ### JSON Messages
@@ -40,6 +57,26 @@ Binary messages use a 1-byte **type header** followed by the payload:
 | `0` | Server → Client | `newStateFromServer` (tank positions) |
 | `1` | Server → Client | `syncBullets` (bullet positions) |
 | `2` | Client → Server | `tankInputToServer` (player input) |
+
+## WebSocket Endpoint
+
+### What is known from this repository
+
+- `gameClient.beginClient(name, serverUrl)` receives the WebSocket URL as a function argument.
+- `new WebSocket(serverUrl)` is called directly from that argument.
+- The value assignment site for `serverUrl` is not present in the source modules in this repo (it is likely provided by surrounding page/bootstrap code outside these files).
+
+### Explicit endpoint found in this workspace
+
+`custom_client/main.py` currently uses:
+
+```py
+url = 'wss://supertanks-app-production-eu.herokuapp.com/'
+```
+
+Treat this as the custom client target endpoint, not guaranteed canonical for all deployments.
+
+For additional notes and caveats, see `connection-auth.md`.
 
 ## Binary Message Formats
 
@@ -214,6 +251,67 @@ Wall arrays are flat:
 ```
 
 (Experience points earned.)
+
+## Connection Handshake and Join Flow
+
+At transport level (WebSocket):
+
+1. Browser performs HTTP Upgrade (and TLS handshake for `wss://`).
+2. `socket.onopen` fires on success.
+
+At game protocol level (application handshake):
+
+1. Client immediately sends JSON `"joinGame"` with `{ name, sessionCookie }`.
+2. Server replies with JSON `"JOIN_SUCCESS"` containing player identity and maze state.
+3. Client can then request spawn via JSON `"spawnPlayer"`.
+4. Server sends `"playerSpawned"` and periodic binary state updates begin/continue.
+
+There is no separate binary handshake message type; join is done as JSON.
+
+## Authentication and Session Cookie
+
+### Mechanism used by client
+
+On connect, the client reads browser cookies and extracts `session_token` from `document.cookie`:
+
+- Cookie key looked up: `session_token`
+- If found: value is sent as `sessionCookie` in `joinGame`
+- If missing: `sessionCookie: null` is sent
+
+### What this implies
+
+- Session identity is attached at application level inside `joinGame`, not in the raw WebSocket frame format.
+- Cookie content is treated as an opaque token by the client (no decoding logic present).
+- Because JavaScript reads it, this cookie cannot be `HttpOnly` in the browser context where the game runs.
+
+### Cookie contents
+
+The exact internal structure of `session_token` is **not visible** in this repo.
+
+- It may be random session ID, signed blob, JWT-like token, or other server-defined format.
+- Client code never parses it; it forwards verbatim.
+
+### How to obtain the cookie
+
+From a normal browser session on the game site:
+
+1. Open the site and let it load normally.
+2. In DevTools, inspect Application/Storage → Cookies for the site origin.
+3. Read `session_token` if present.
+
+Or via console on that origin:
+
+```js
+document.cookie
+```
+
+Then extract `session_token=...`.
+
+Important:
+
+- Respect site Terms of Service and applicable laws.
+- Never share active session tokens.
+- Session tokens are credentials.
 
 ## Timing & Synchronization
 
