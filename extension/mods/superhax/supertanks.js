@@ -1920,6 +1920,8 @@ t.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletPaths,
     var MAX_THREAT_DIST_SQ = 260 * 260;
     var MAX_LINE_PENALTY_DIST_SQ = 280 * 280;
 
+    var mobilityCache = {};
+
     function normAngle(a) {
         while (a <= -Math.PI) a += 2 * Math.PI;
         while (a > Math.PI) a -= 2 * Math.PI;
@@ -2103,12 +2105,18 @@ t.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletPaths,
     var preferredAngle = Math.atan2(repY, repX);
     var threatMag = Math.sqrt(threatVx * threatVx + threatVy * threatVy);
     if (threatMag > 0.0001) {
-        // Favor side-stepping bullet flow (perpendicular movement) over line-running.
-        var perpA = Math.atan2(threatVy, threatVx) + Math.PI * 0.5;
+        var flowA = Math.atan2(threatVy, threatVx);
+        var perpA = flowA + Math.PI * 0.5;
         var perpB = perpA + Math.PI;
+        var sourceA = flowA + Math.PI;
+        var sourceB = flowA;
         var side = angleDiff(perpA, preferredAngle) <= angleDiff(perpB, preferredAngle) ? perpA : perpB;
-        var px = repX + Math.cos(side) * threatMag * 0.9;
-        var py = repY + Math.sin(side) * threatMag * 0.9;
+        var towardSource = angleDiff(sourceA, preferredAngle) <= angleDiff(sourceB, preferredAngle) ? sourceA : sourceB;
+        var startMob = localMobility(tankX, tankY);
+        var sourceWeight = startMob < 0.35 ? 0.55 : 0.15;
+        var sideWeight = 1 - sourceWeight;
+        var px = repX * sideWeight + Math.cos(towardSource) * threatMag * sourceWeight + Math.cos(side) * threatMag * sideWeight;
+        var py = repY * sideWeight + Math.sin(towardSource) * threatMag * sourceWeight + Math.sin(side) * threatMag * sideWeight;
         if (Math.abs(px) > 0.0001 || Math.abs(py) > 0.0001) {
             preferredAngle = Math.atan2(py, px);
         }
@@ -2177,7 +2185,6 @@ t.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletPaths,
         return best;
     }
 
-    var mobilityCache = {};
     function localMobility(px, py) {
         var qx = (px / 12) | 0;
         var qy = (py / 12) | 0;
@@ -2194,6 +2201,26 @@ t.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletPaths,
         var m = free / dirs;
         mobilityCache[key] = m;
         return m;
+    }
+
+    function futureReachability(px, py) {
+        var reachableFree = 0;
+        var total = 0;
+        for (var i = 0; i < 8; i++) {
+            var a = (i / 8) * 2 * Math.PI - Math.PI;
+            var adv = advanceWithCollision(px, py, a);
+            if (adv.blocked) continue;
+            var nx = adv.x, ny = adv.y;
+            var subFree = 0;
+            for (var j = 0; j < 4; j++) {
+                var sa = (j / 4) * 2 * Math.PI - Math.PI;
+                var subAdv = advanceWithCollision(nx, ny, sa);
+                if (!subAdv.blocked) subFree++;
+            }
+            reachableFree += subFree;
+            total++;
+        }
+        return total > 0 ? reachableFree / (total * 4) : 0;
     }
 
     function getBranchAngles(safe) {
@@ -2254,16 +2281,17 @@ t.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletPaths,
 
     function firstAngleSafety(angle) {
         if (angle === null) return 0;
-        // Strong gate: if first move choice dies quickly, don't pick it.
         var seg = simulateSegment(tankX, tankY, angle, 0, 30);
         var safety = seg.hit ? seg.hitStep : 999;
         var startMobility = localMobility(tankX, tankY);
         var endMobility = localMobility(seg.x, seg.y);
-        // Penalize openings that mostly press into walls and fail to create space.
+        var endReachability = futureReachability(seg.x, seg.y);
         safety -= seg.blockedCount * (mustMove ? 22 : 4);
         if (seg.movedDist < STEP_DX * 8) safety -= (mustMove ? 36 : 10);
         if (mustMove && endMobility < startMobility - 0.12) safety -= 26;
         if (mustMove && endMobility < 0.26) safety -= 36;
+        if (mustMove && endReachability < 0.3) safety -= 30;
+        if (endReachability < 0.2) safety -= 20;
         return safety;
     }
 
@@ -2304,8 +2332,10 @@ t.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletPaths,
                 }
                 var linePenalty = lineFollowingPenalty(a2, seg.x, seg.y, stepNow);
                 var mobility = localMobility(seg.x, seg.y);
+                var reachability = futureReachability(seg.x, seg.y);
                 var deadEndPenalty = (1 - mobility) * 140;
                 var mobilityBonus = mobility * 220;
+                var reachabilityBonus = reachability * 180;
                 var stallPenalty = seg.blockedCount * 65;
                 var turnPenalty = 0;
                 if (a2 !== null && node.angles.length > 0) {
@@ -2352,7 +2382,7 @@ t.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletPaths,
                 var shortTermScore = Math.min(1200, clearanceNow * 0.0007);
                 var progressScore = newStep * 2.2;
                 var stillBonus = (a2 === null) ? (mustMove ? -180 : 6) : 0;
-                var score = node.score + longTermScore + shortTermScore + progressScore + stillBonus + mobilityBonus + lateralBonus - wallPenalty - linePenalty - deadEndPenalty - stallPenalty - trapPenalty - cornerRamPenalty - nearDangerPenalty - turnPenalty;
+                var score = node.score + longTermScore + shortTermScore + progressScore + stillBonus + mobilityBonus + reachabilityBonus + lateralBonus - wallPenalty - linePenalty - deadEndPenalty - stallPenalty - trapPenalty - cornerRamPenalty - nearDangerPenalty - turnPenalty;
 
                 var angles2 = node.angles.slice();
                 angles2.push(a2);
@@ -2645,6 +2675,40 @@ t.exports.findAutoKillShot = function (args) {
         return freeDirs / dirs;
     }
 
+    function isDeadEnd(px, py) {
+        var freeDirs = 0;
+        for (var i = 0; i < DIR8.length; i++) {
+            var qx = px + DIR8[i].c * 60;
+            var qy = py + DIR8[i].s * 60;
+            if (!pointBlocked(qx, qy, 18)) freeDirs++;
+        }
+        return freeDirs <= 2;
+    }
+
+    function pathOpenness(path) {
+        if (!path || path.length < 10) return 0.5;
+        var samples = 0;
+        var totalOpen = 0;
+        for (var i = 0; i < path.length; i += Math.max(1, Math.floor(path.length / 12))) {
+            var p = path[i];
+            totalOpen += corridorNetworkDepth(p.x, p.y);
+            samples++;
+        }
+        return samples > 0 ? totalOpen / samples : 0.5;
+    }
+
+    function deadEndPenalty(path) {
+        if (!path || path.length < 10) return 0;
+        var penalty = 0;
+        var checked = 0;
+        for (var i = 0; i < path.length; i += Math.max(1, Math.floor(path.length / 8))) {
+            var p = path[i];
+            if (isDeadEnd(p.x, p.y)) penalty += 1;
+            checked++;
+        }
+        return checked > 0 ? (penalty / checked) * 280 : 0;
+    }
+
     function chooseTarget() {
         var best = null;
         var bestScore = -1e12;
@@ -2669,8 +2733,9 @@ t.exports.findAutoKillShot = function (args) {
 
             var bounceOpportunity = corridorNetworkDepth(enemy.x, enemy.y) * 15;
             var distanceScore = 40 / (1 + d * 0.002);
+            var opennessBonus = openArea * 50;
 
-            var score = threat + exposure + bounceOpportunity + distanceScore;
+            var score = threat + exposure + bounceOpportunity + distanceScore + opennessBonus;
             if (preferredTargetMap && preferredTargetMap[enemy.ID]) score += 800;
             if (score > bestScore) {
                 bestScore = score;
@@ -2905,6 +2970,31 @@ t.exports.findAutoKillShot = function (args) {
     var pointBlankThreat = targetDist < 100;
     var availableBalls = Math.max(0, maxBullets - bulletsSpawnedCount);
 
+    var hasDirectTarget = false;
+    for (var dti = 0; dti < tanks.length; dti++) {
+        var dt = tanks[dti];
+        if (!dt || dt.ID === localTank.ID || dt.beenHit) continue;
+        var ddx = dt.x - localTank.x;
+        var ddy = dt.y - localTank.y;
+        if (ddx * ddx + ddy * ddy < 300 * 300 && hasLineOfSight(localTank.x, localTank.y, dt.x, dt.y)) {
+            hasDirectTarget = true;
+            break;
+        }
+    }
+
+    var reservedBalls = 1;
+    if (hasDirectTarget && availableBalls <= 3) {
+        reservedBalls = 0;
+    } else if (hasDirectTarget && availableBalls <= 5) {
+        reservedBalls = Math.max(1, Math.floor(availableBalls * 0.1));
+    }
+
+    var effectiveAvailable = Math.max(0, availableBalls - reservedBalls);
+    if (effectiveAvailable <= 0) return null;
+
+    var tacticalCadenceMaxBullets = maxBullets - reservedBalls;
+    if (bulletsSpawnedCount >= tacticalCadenceMaxBullets) return null;
+
     // Tactical cadence: adapt with available ammo and urgency.
     var minShotInterval;
     if (pointBlankThreat) {
@@ -2959,6 +3049,10 @@ t.exports.findAutoKillShot = function (args) {
         var simStats = similarActiveStats(path);
         var similarity = simStats.best;
         var similarActiveCount = simStats.count;
+
+        var openness = pathOpenness(path);
+        var deadEnd = deadEndPenalty(path);
+
         if (!pointBlankThreat) {
             if (similarActiveCount >= 3) continue;
             if (similarity > 0.90 && similarActiveCount >= 1) continue;
@@ -2968,9 +3062,12 @@ t.exports.findAutoKillShot = function (args) {
         }
 
         var score = evalHit.score * 110 + pressureNearScore * 95;
+        score += openness * 180;
+        score -= deadEnd;
         if (shouldPreferDefensive) {
             if (evalHit.earliestHit < Infinity) score += Math.max(0, 240 - evalHit.earliestHit * 2.2);
             score += Math.max(0, 8 - bounceCount) * 8;
+            score += openness * 120;
         } else {
             // Tactical pressure: value coverage, staggered timing, and non-trivial ricochets.
             var arrival = evalHit.earliestHit === Infinity ? 160 : evalHit.earliestHit;
@@ -2978,6 +3075,7 @@ t.exports.findAutoKillShot = function (args) {
             score += Math.min(120, bounceCount * 5);
             score += Math.max(0, 140 - Math.abs(95 - arrival));
             if (arrival < 35) score -= 80;
+            score += openness * 100;
         }
 
         score += (1 - similarity) * 110;
@@ -3002,9 +3100,6 @@ t.exports.findAutoKillShot = function (args) {
 
     scoredCandidates.sort(function (a, b) { return b.score - a.score; });
     _latestRankedPaths = scoredCandidates.slice(0, 20);
-
-    // DONT REMOVE
-    if (best) console.log(best.score)
 
     if (!best || best.score < 55) {
         // Fallback direct shot only when threat is nearby.
@@ -4390,6 +4485,7 @@ function(t, e, a) {
         var minVisibleWidth = 0.7;
 
         var count = Math.min(20, ranked.length);
+
         for (var i = 0; i < count; i++) {
             var cand = ranked[i];
             if (!cand.path || cand.path.length < 2) continue;
@@ -4417,6 +4513,7 @@ function(t, e, a) {
                 var a = cand.path[p - 1];
                 var b = cand.path[p];
                 var distT = p / Math.max(1, pathLen - 1);
+
                 // Slight fade with travel distance along each path.
                 var segFade = (i === 0) ? 1 : (1 - 0.45 * Math.pow(distT, 1.2));
                 var alpha = Math.max(minVisibleAlpha, baseAlpha * segFade);
@@ -4630,7 +4727,6 @@ function(t, e, a) {
         tickNum = 0;
         movementInputBuffer = [];
         shootInputBuffer = [];
-        true;
 
         requestAnimationFrame(gameLoop);
         setInterval(physicsStep, constants.PHYSICS_INTERVAL);
@@ -4992,6 +5088,7 @@ function(t, e, a) {
         var camTop = camera.camTop;
         var canvasWidth = canvas.width;
         var canvasHeight = canvas.height;
+
         for (var i = 0; i < wallCornerSprites.length; i++) {
             var sprite = wallSprites[wallCornerSprites[i].weight];
             var spriteW = sprite.width / dpr;

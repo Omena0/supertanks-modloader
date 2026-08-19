@@ -13,6 +13,8 @@ module.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletP
     var MAX_THREAT_DIST_SQ = 260 * 260;
     var MAX_LINE_PENALTY_DIST_SQ = 280 * 280;
 
+    var mobilityCache = {};
+
     function normAngle(a) {
         while (a <= -Math.PI) a += 2 * Math.PI;
         while (a > Math.PI) a -= 2 * Math.PI;
@@ -196,12 +198,18 @@ module.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletP
     var preferredAngle = Math.atan2(repY, repX);
     var threatMag = Math.sqrt(threatVx * threatVx + threatVy * threatVy);
     if (threatMag > 0.0001) {
-        // Favor side-stepping bullet flow (perpendicular movement) over line-running.
-        var perpA = Math.atan2(threatVy, threatVx) + Math.PI * 0.5;
+        var flowA = Math.atan2(threatVy, threatVx);
+        var perpA = flowA + Math.PI * 0.5;
         var perpB = perpA + Math.PI;
+        var sourceA = flowA + Math.PI;
+        var sourceB = flowA;
         var side = angleDiff(perpA, preferredAngle) <= angleDiff(perpB, preferredAngle) ? perpA : perpB;
-        var px = repX + Math.cos(side) * threatMag * 0.9;
-        var py = repY + Math.sin(side) * threatMag * 0.9;
+        var towardSource = angleDiff(sourceA, preferredAngle) <= angleDiff(sourceB, preferredAngle) ? sourceA : sourceB;
+        var startMob = localMobility(tankX, tankY);
+        var sourceWeight = startMob < 0.35 ? 0.55 : 0.15;
+        var sideWeight = 1 - sourceWeight;
+        var px = repX * sideWeight + Math.cos(towardSource) * threatMag * sourceWeight + Math.cos(side) * threatMag * sideWeight;
+        var py = repY * sideWeight + Math.sin(towardSource) * threatMag * sourceWeight + Math.sin(side) * threatMag * sideWeight;
         if (Math.abs(px) > 0.0001 || Math.abs(py) > 0.0001) {
             preferredAngle = Math.atan2(py, px);
         }
@@ -270,7 +278,6 @@ module.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletP
         return best;
     }
 
-    var mobilityCache = {};
     function localMobility(px, py) {
         var qx = (px / 12) | 0;
         var qy = (py / 12) | 0;
@@ -287,6 +294,26 @@ module.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletP
         var m = free / dirs;
         mobilityCache[key] = m;
         return m;
+    }
+
+    function futureReachability(px, py) {
+        var reachableFree = 0;
+        var total = 0;
+        for (var i = 0; i < 8; i++) {
+            var a = (i / 8) * 2 * Math.PI - Math.PI;
+            var adv = advanceWithCollision(px, py, a);
+            if (adv.blocked) continue;
+            var nx = adv.x, ny = adv.y;
+            var subFree = 0;
+            for (var j = 0; j < 4; j++) {
+                var sa = (j / 4) * 2 * Math.PI - Math.PI;
+                var subAdv = advanceWithCollision(nx, ny, sa);
+                if (!subAdv.blocked) subFree++;
+            }
+            reachableFree += subFree;
+            total++;
+        }
+        return total > 0 ? reachableFree / (total * 4) : 0;
     }
 
     function getBranchAngles(safe) {
@@ -347,16 +374,17 @@ module.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletP
 
     function firstAngleSafety(angle) {
         if (angle === null) return 0;
-        // Strong gate: if first move choice dies quickly, don't pick it.
         var seg = simulateSegment(tankX, tankY, angle, 0, 30);
         var safety = seg.hit ? seg.hitStep : 999;
         var startMobility = localMobility(tankX, tankY);
         var endMobility = localMobility(seg.x, seg.y);
-        // Penalize openings that mostly press into walls and fail to create space.
+        var endReachability = futureReachability(seg.x, seg.y);
         safety -= seg.blockedCount * (mustMove ? 22 : 4);
         if (seg.movedDist < STEP_DX * 8) safety -= (mustMove ? 36 : 10);
         if (mustMove && endMobility < startMobility - 0.12) safety -= 26;
         if (mustMove && endMobility < 0.26) safety -= 36;
+        if (mustMove && endReachability < 0.3) safety -= 30;
+        if (endReachability < 0.2) safety -= 20;
         return safety;
     }
 
@@ -397,8 +425,10 @@ module.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletP
                 }
                 var linePenalty = lineFollowingPenalty(a2, seg.x, seg.y, stepNow);
                 var mobility = localMobility(seg.x, seg.y);
+                var reachability = futureReachability(seg.x, seg.y);
                 var deadEndPenalty = (1 - mobility) * 140;
                 var mobilityBonus = mobility * 220;
+                var reachabilityBonus = reachability * 180;
                 var stallPenalty = seg.blockedCount * 65;
                 var turnPenalty = 0;
                 if (a2 !== null && node.angles.length > 0) {
@@ -445,7 +475,7 @@ module.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletP
                 var shortTermScore = Math.min(1200, clearanceNow * 0.0007);
                 var progressScore = newStep * 2.2;
                 var stillBonus = (a2 === null) ? (mustMove ? -180 : 6) : 0;
-                var score = node.score + longTermScore + shortTermScore + progressScore + stillBonus + mobilityBonus + lateralBonus - wallPenalty - linePenalty - deadEndPenalty - stallPenalty - trapPenalty - cornerRamPenalty - nearDangerPenalty - turnPenalty;
+                var score = node.score + longTermScore + shortTermScore + progressScore + stillBonus + mobilityBonus + reachabilityBonus + lateralBonus - wallPenalty - linePenalty - deadEndPenalty - stallPenalty - trapPenalty - cornerRamPenalty - nearDangerPenalty - turnPenalty;
 
                 var angles2 = node.angles.slice();
                 angles2.push(a2);

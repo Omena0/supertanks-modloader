@@ -138,6 +138,40 @@ module.exports.findAutoKillShot = function (args) {
         return freeDirs / dirs;
     }
 
+    function isDeadEnd(px, py) {
+        var freeDirs = 0;
+        for (var i = 0; i < DIR8.length; i++) {
+            var qx = px + DIR8[i].c * 60;
+            var qy = py + DIR8[i].s * 60;
+            if (!pointBlocked(qx, qy, 18)) freeDirs++;
+        }
+        return freeDirs <= 2;
+    }
+
+    function pathOpenness(path) {
+        if (!path || path.length < 10) return 0.5;
+        var samples = 0;
+        var totalOpen = 0;
+        for (var i = 0; i < path.length; i += Math.max(1, Math.floor(path.length / 12))) {
+            var p = path[i];
+            totalOpen += corridorNetworkDepth(p.x, p.y);
+            samples++;
+        }
+        return samples > 0 ? totalOpen / samples : 0.5;
+    }
+
+    function deadEndPenalty(path) {
+        if (!path || path.length < 10) return 0;
+        var penalty = 0;
+        var checked = 0;
+        for (var i = 0; i < path.length; i += Math.max(1, Math.floor(path.length / 8))) {
+            var p = path[i];
+            if (isDeadEnd(p.x, p.y)) penalty += 1;
+            checked++;
+        }
+        return checked > 0 ? (penalty / checked) * 280 : 0;
+    }
+
     function chooseTarget() {
         var best = null;
         var bestScore = -1e12;
@@ -162,8 +196,9 @@ module.exports.findAutoKillShot = function (args) {
 
             var bounceOpportunity = corridorNetworkDepth(enemy.x, enemy.y) * 15;
             var distanceScore = 40 / (1 + d * 0.002);
+            var opennessBonus = openArea * 50;
 
-            var score = threat + exposure + bounceOpportunity + distanceScore;
+            var score = threat + exposure + bounceOpportunity + distanceScore + opennessBonus;
             if (preferredTargetMap && preferredTargetMap[enemy.ID]) score += 800;
             if (score > bestScore) {
                 bestScore = score;
@@ -398,6 +433,31 @@ module.exports.findAutoKillShot = function (args) {
     var pointBlankThreat = targetDist < 100;
     var availableBalls = Math.max(0, maxBullets - bulletsSpawnedCount);
 
+    var hasDirectTarget = false;
+    for (var dti = 0; dti < tanks.length; dti++) {
+        var dt = tanks[dti];
+        if (!dt || dt.ID === localTank.ID || dt.beenHit) continue;
+        var ddx = dt.x - localTank.x;
+        var ddy = dt.y - localTank.y;
+        if (ddx * ddx + ddy * ddy < 300 * 300 && hasLineOfSight(localTank.x, localTank.y, dt.x, dt.y)) {
+            hasDirectTarget = true;
+            break;
+        }
+    }
+
+    var reservedBalls = 1;
+    if (hasDirectTarget && availableBalls <= 3) {
+        reservedBalls = 0;
+    } else if (hasDirectTarget && availableBalls <= 5) {
+        reservedBalls = Math.max(1, Math.floor(availableBalls * 0.1));
+    }
+
+    var effectiveAvailable = Math.max(0, availableBalls - reservedBalls);
+    if (effectiveAvailable <= 0) return null;
+
+    var tacticalCadenceMaxBullets = maxBullets - reservedBalls;
+    if (bulletsSpawnedCount >= tacticalCadenceMaxBullets) return null;
+
     // Tactical cadence: adapt with available ammo and urgency.
     var minShotInterval;
     if (pointBlankThreat) {
@@ -452,6 +512,10 @@ module.exports.findAutoKillShot = function (args) {
         var simStats = similarActiveStats(path);
         var similarity = simStats.best;
         var similarActiveCount = simStats.count;
+
+        var openness = pathOpenness(path);
+        var deadEnd = deadEndPenalty(path);
+
         if (!pointBlankThreat) {
             if (similarActiveCount >= 3) continue;
             if (similarity > 0.90 && similarActiveCount >= 1) continue;
@@ -461,9 +525,12 @@ module.exports.findAutoKillShot = function (args) {
         }
 
         var score = evalHit.score * 110 + pressureNearScore * 95;
+        score += openness * 180;
+        score -= deadEnd;
         if (shouldPreferDefensive) {
             if (evalHit.earliestHit < Infinity) score += Math.max(0, 240 - evalHit.earliestHit * 2.2);
             score += Math.max(0, 8 - bounceCount) * 8;
+            score += openness * 120;
         } else {
             // Tactical pressure: value coverage, staggered timing, and non-trivial ricochets.
             var arrival = evalHit.earliestHit === Infinity ? 160 : evalHit.earliestHit;
@@ -471,6 +538,7 @@ module.exports.findAutoKillShot = function (args) {
             score += Math.min(120, bounceCount * 5);
             score += Math.max(0, 140 - Math.abs(95 - arrival));
             if (arrival < 35) score -= 80;
+            score += openness * 100;
         }
 
         score += (1 - similarity) * 110;

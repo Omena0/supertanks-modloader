@@ -371,6 +371,7 @@
         var minVisibleWidth = 0.7;
 
         var count = Math.min(20, ranked.length);
+
         for (var i = 0; i < count; i++) {
             var cand = ranked[i];
             if (!cand.path || cand.path.length < 2) continue;
@@ -398,6 +399,7 @@
                 var a = cand.path[p - 1];
                 var b = cand.path[p];
                 var distT = p / Math.max(1, pathLen - 1);
+
                 // Slight fade with travel distance along each path.
                 var segFade = (i === 0) ? 1 : (1 - 0.45 * Math.pow(distT, 1.2));
                 var alpha = Math.max(minVisibleAlpha, baseAlpha * segFade);
@@ -611,7 +613,6 @@
         tickNum = 0;
         movementInputBuffer = [];
         shootInputBuffer = [];
-        true;
 
         requestAnimationFrame(gameLoop);
         setInterval(physicsStep, constants.PHYSICS_INTERVAL);
@@ -973,6 +974,7 @@
         var camTop = camera.camTop;
         var canvasWidth = canvas.width;
         var canvasHeight = canvas.height;
+
         for (var i = 0; i < wallCornerSprites.length; i++) {
             var sprite = wallSprites[wallCornerSprites[i].weight];
             var spriteW = sprite.width / dpr;
