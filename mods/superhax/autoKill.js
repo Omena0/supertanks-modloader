@@ -145,7 +145,7 @@ module.exports.findAutoKillShot = function (args) {
             var qy = py + DIR8[i].s * 60;
             if (!pointBlocked(qx, qy, 18)) freeDirs++;
         }
-        return freeDirs <= 2;
+        return freeDirs <= 1;
     }
 
     function pathOpenness(path) {
@@ -445,18 +445,11 @@ module.exports.findAutoKillShot = function (args) {
         }
     }
 
-    var reservedBalls = 1;
-    if (hasDirectTarget && availableBalls <= 3) {
-        reservedBalls = 0;
-    } else if (hasDirectTarget && availableBalls <= 5) {
-        reservedBalls = Math.max(1, Math.floor(availableBalls * 0.1));
-    }
-
+    var reservedBalls = hasDirectTarget && availableBalls >= 4 ? 1 : 0;
     var effectiveAvailable = Math.max(0, availableBalls - reservedBalls);
     if (effectiveAvailable <= 0) return null;
 
-    var tacticalCadenceMaxBullets = maxBullets - reservedBalls;
-    if (bulletsSpawnedCount >= tacticalCadenceMaxBullets) return null;
+    if (bulletsSpawnedCount >= maxBullets - reservedBalls) return null;
 
     // Tactical cadence: adapt with available ammo and urgency.
     var minShotInterval;
@@ -465,7 +458,7 @@ module.exports.findAutoKillShot = function (args) {
     } else if (nearbyThreat) {
         minShotInterval = availableBalls >= 6 ? 7 : (availableBalls >= 3 ? 11 : 14);
     } else {
-        minShotInterval = availableBalls >= 6 ? 18 : 26;
+        minShotInterval = availableBalls >= 6 ? 18 : (availableBalls >= 3 ? 10 : 14);
     }
     if (tickNum - lastShotTick <= minShotInterval) return null;
 
@@ -481,7 +474,7 @@ module.exports.findAutoKillShot = function (args) {
     } else if (nearbyThreat) {
         maxSameLaneShots = Math.min(3, Math.max(1, Math.ceil(availableBalls * 0.45)));
     } else {
-        maxSameLaneShots = 1;
+        maxSameLaneShots = Math.min(2, Math.max(1, Math.ceil(availableBalls * 0.4)));
     }
 
     var angles = generateCandidateAngles(target);
@@ -564,9 +557,9 @@ module.exports.findAutoKillShot = function (args) {
     scoredCandidates.sort(function (a, b) { return b.score - a.score; });
     _latestRankedPaths = scoredCandidates.slice(0, 20);
 
-    if (!best || best.score < 55) {
-        // Fallback direct shot only when threat is nearby.
-        if (!nearbyThreat) return null;
+    if (!best || best.score < 30) {
+        // Fallback direct shot when we have ammo to spend.
+        if (availableBalls <= 0) return null;
         var directAngle = quantizeAngle(Math.atan2(target.y - localTank.y, target.x - localTank.x));
         var sx = localTank.x + 40 * Math.cos(directAngle);
         var sy = localTank.y + 40 * Math.sin(directAngle);
@@ -577,7 +570,7 @@ module.exports.findAutoKillShot = function (args) {
             rememberLaneShot(directKey, tickNum);
             return {
                 angle: Math.round(directAngle * 1000) / 1000,
-                score: 90,
+                score: 60,
                 targetId: target.ID,
                 path: null,
             };
