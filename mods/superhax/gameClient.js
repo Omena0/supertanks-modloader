@@ -548,7 +548,10 @@
         canvas.addEventListener("click", handleClick, false);
         canvas.addEventListener("mousedown", handleMouseDown, false);
         canvas.addEventListener("auxclick", function (e) {
-            if (e.button === 1) e.preventDefault();
+            if (e.button === 1 || e.button === 2) e.preventDefault();
+        }, false);
+        canvas.addEventListener("contextmenu", function (e) {
+            e.preventDefault();
         }, false);
         window.addEventListener("resize", resizeCanvas);
 
@@ -882,7 +885,7 @@
     }
 
     function handleMouseDown(event) {
-        if (event.button !== 1) return;
+        if (event.button !== 2) return;
         event.preventDefault();
         if (!hasJoined || !pathfindEnabled || !maze.cellsAcross) return;
         var targetX = event.clientX + camera.camLeft;

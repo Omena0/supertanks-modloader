@@ -205,8 +205,7 @@ module.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletP
         var sourceB = flowA;
         var side = angleDiff(perpA, preferredAngle) <= angleDiff(perpB, preferredAngle) ? perpA : perpB;
         var towardSource = angleDiff(sourceA, preferredAngle) <= angleDiff(sourceB, preferredAngle) ? sourceA : sourceB;
-        var startMob = localMobility(tankX, tankY);
-        var sourceWeight = startMob < 0.35 ? 0.55 : 0.15;
+        var sourceWeight = 0.15;
         var sideWeight = 1 - sourceWeight;
         var px = repX * sideWeight + Math.cos(towardSource) * threatMag * sourceWeight + Math.cos(side) * threatMag * sideWeight;
         var py = repY * sideWeight + Math.sin(towardSource) * threatMag * sourceWeight + Math.sin(side) * threatMag * sideWeight;
@@ -279,10 +278,12 @@ module.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletP
     }
 
     function localMobility(px, py) {
+        if (!localMobility._cache) localMobility._cache = {};
+        var cache = localMobility._cache;
         var qx = (px / 12) | 0;
         var qy = (py / 12) | 0;
         var key = qx + ":" + qy;
-        if (mobilityCache[key] !== undefined) return mobilityCache[key];
+        if (cache[key] !== undefined) return cache[key];
 
         var free = 0;
         var dirs = 8;
@@ -292,7 +293,7 @@ module.exports.findDodgeAction = function (tankX, tankY, mazeData, cachedBulletP
             if (!adv.blocked) free++;
         }
         var m = free / dirs;
-        mobilityCache[key] = m;
+        cache[key] = m;
         return m;
     }
 
